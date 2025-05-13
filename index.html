@@ -1,0 +1,209 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vehicle Files QR Code Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+  <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-lg">
+    <h1 class="text-2xl font-bold mb-6 text-center">Vehicle Files QR Code Generator</h1>
+
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-2">Step 1: Upload Files to Google Drive</label>
+      <p class="text-sm text-gray-600">
+        Upload your vehicle files to Google Drive, set sharing to "Anyone with the link," and copy the shareable links.
+      </p>
+    </div>
+
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-2">Step 2: Add Google Drive Links</label>
+      <div id="linkInputs">
+        <div class="flex mb-2">
+          <input
+            type="url"
+            placeholder="https://drive.google.com/..."
+            class="link-input w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+          <button
+            onclick="removeLinkInput(this)"
+            class="ml-2 bg-red-600 text-white p-2 rounded-md hover:bg-red-700"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+      <button
+        onclick="addLinkInput()"
+        class="mt-2 bg-green-600 text-white p-2 rounded-md hover:bg-green-700"
+      >
+        Add Another Link
+      </button>
+    </div>
+
+    <button
+      onclick="generateQRCodes()"
+      class="w-full bg-blue-600 text-white p-2 rounded-md hover:bg-blue-700 mb-4"
+    >
+      Generate QR Codes
+    </button>
+
+    <div id="qrCodes" class="mt-6"></div>
+
+    <button
+      onclick="downloadPDF()"
+      id="downloadPDFBtn"
+      class="w-full bg-purple-600 text-white p-2 rounded-md hover:bg-purple-700 hidden"
+    >
+      Download QR Codes as PDF
+    </button>
+
+    <div class="mt-6 text-sm text-gray-600">
+      <p><strong>Instructions:</strong></p>
+      <ul class="list-disc pl-5">
+        <li>Upload vehicle files to Google Drive and get shareable links.</li>
+        <li>Add one or more links above.</li>
+        <li>Click "Generate QR Codes" to preview.</li>
+        <li>Click "Download QR Codes as PDF" to save all QR codes.</li>
+        <li>Scan the QR codes to access the Google Drive files.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    function addLinkInput() {
+      const linkInputs = document.getElementById('linkInputs');
+      const newInput = document.createElement('div');
+      newInput.className = 'flex mb-2';
+      newInput.innerHTML = `
+        <input
+          type="url"
+          placeholder="https://drive.google.com/..."
+          class="link-input w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+        <button
+          onclick="removeLinkInput(this)"
+          class="ml-2 bg-red-600 text-white p-2 rounded-md hover:bg-red-700"
+        >
+          Remove
+        </button>
+      `;
+      linkInputs.appendChild(newInput);
+    }
+
+    function removeLinkInput(button) {
+      if (document.querySelectorAll('#linkInputs .flex').length > 1) {
+        button.parentElement.remove();
+      }
+    }
+
+    function generateQRCodes() {
+      const links = Array.from(document.getElementsByClassName('link-input')).map(input => input.value.trim());
+      const qrCodesDiv = document.getElementById('qrCodes');
+      const downloadPDFBtn = document.getElementById('downloadPDFBtn');
+
+      // Clear previous QR codes
+      qrCodesDiv.innerHTML = '';
+      window.qrCodeImages = []; // Store QR code data URLs
+
+      if (links.every(link => !link)) {
+        alert('Please enter at least one valid Google Drive link.');
+        downloadPDFBtn.classList.add('hidden');
+        return;
+      }
+
+      links.forEach((link, index) => {
+        if (link) {
+          const qrDiv = document.createElement('div');
+          qrDiv.className = 'mb-4 text-center';
+          qrDiv.innerHTML = `<p class="text-sm mb-2">QR Code for Link ${index + 1}</p>`;
+          const qrCanvasDiv = document.createElement('div');
+          qrCanvasDiv.id = `qrCode${index}`;
+          qrDiv.appendChild(qrCanvasDiv);
+          qrCodesDiv.appendChild(qrDiv);
+
+          new QRCode(qrCanvasDiv.id, {
+            text: link,
+            width: 200,
+            height: 200,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.L
+          });
+
+          // Store QR code image data
+          setTimeout(() => {
+            const canvas = qrCanvasDiv.querySelector('canvas');
+            if (canvas) {
+              window.qrCodeImages.push({ link, dataURL: canvas.toDataURL('image/png') });
+            }
+          }, 100);
+        }
+      });
+
+      downloadPDFBtn.classList.remove('hidden');
+    }
+
+    function downloadPDF() {
+      if (!window.qrCodeImages || window.qrCodeImages.length === 0) {
+        alert('No QR codes generated yet.');
+        return;
+      }
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      window.qrCodeImages.forEach(({ link, dataURL }, index) => {
+        if (index > 0) doc.addPage();
+        doc.setFontSize(12);
+        doc.text(`QR Code for: ${link.substring(0, 50)}${link.length > 50 ? '...' : ''}`, 10, 20);
+        doc.addImage(dataURL, 'PNG', 10, 30, 80, 80); // 80mm x 80mm
+      });
+
+      doc.save('vehicle_files_qr_codes.pdf');
+    }
+  </script>
+</body>
+</html>
